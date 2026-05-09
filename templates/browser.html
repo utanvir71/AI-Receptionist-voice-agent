@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Receptionist Browser</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f7f7f7;
+            margin: 0;
+            padding: 40px;
+        }
+
+        .container {
+            max-width: 700px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+        }
+
+        h1 {
+            margin-top: 0;
+        }
+
+        p {
+            color: #444;
+        }
+
+        .buttons {
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 12px 18px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .connect {
+            background: #2563eb;
+            color: white;
+        }
+
+        .call {
+            background: #16a34a;
+            color: white;
+        }
+
+        .hangup {
+            background: #dc2626;
+            color: white;
+        }
+
+        #statusBox {
+            margin-top: 25px;
+            padding: 15px;
+            background: #f1f5f9;
+            border-radius: 8px;
+            min-height: 120px;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI Receptionist Browser Test</h1>
+        <p>This is the browser UI for your Twilio calling prototype.</p>
+
+        <div class="buttons">
+            <button class="connect" onclick="connectDevice()">Connect Device</button>
+            <button class="call" onclick="makeCall()">Call</button>
+            <button class="hangup" onclick="hangUp()">Hang Up</button>
+        </div>
+
+        <div id="statusBox">Status: Page loaded successfully.</div>
+    </div>
+
+    <script>
+        let twilioToken = null;
+
+        function setStatus(message) {
+            document.getElementById("statusBox").innerText = "Status: " + message;
+        }
+
+        async function connectDevice() {
+            try {
+                setStatus("Requesting Twilio token from backend...");
+
+                const response = await fetch("/token");
+                const data = await response.json();
+
+                if (!response.ok) {
+                    setStatus("Token fetch failed: " + (data.error || "unknown error"));
+                    return;
+                }
+
+                if (!data.token) {
+                    setStatus("No token received from backend.");
+                    return;
+                }
+
+                twilioToken = data.token;
+
+                setStatus(
+                    "Twilio token received successfully.\n\n" +
+                    "Identity: " + data.identity + "\n" +
+                    "Token preview: " + twilioToken.substring(0, 80) + "..."
+                );
+            } catch (error) {
+                setStatus("Error while fetching token: " + error.message);
+            }
+        }
+
+        function makeCall() {
+            if (!twilioToken) {
+                setStatus("No Twilio token yet. Click Connect Device first.");
+                return;
+            }
+
+            setStatus("Token exists. Next step is Twilio Device registration.");
+        }
+
+        function hangUp() {
+            setStatus("Hang Up button clicked.");
+        }
+    </script>
+</body>
+</html>
