@@ -67,6 +67,9 @@
             white-space: pre-wrap;
         }
     </style>
+
+    <!-- Twilio Voice SDK -->
+    <script src="/twilio.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -84,6 +87,8 @@
 
     <script>
         let twilioToken = null;
+        let device = null;
+        let activeCall = null;
 
         function setStatus(message) {
             document.getElementById("statusBox").innerText = "Status: " + message;
@@ -108,27 +113,106 @@
 
                 twilioToken = data.token;
 
-                setStatus(
-                    "Twilio token received successfully.\n\n" +
-                    "Identity: " + data.identity + "\n" +
-                    "Token preview: " + twilioToken.substring(0, 80) + "..."
-                );
+                setStatus("Token received. Creating Twilio Device...");
+
+                device = new Twilio.Device(twilioToken, {
+                    codecPreferences: ["opus", "pcmu"],
+                    fakeLocalDTMF: true,
+                    enableRingingState: true,
+                    logLevel: 1
+                });
+
+                device.on("registered", function () {
+                    setStatus("Twilio Device registered successfully. You can now make a browser call.");
+                });
+
+                device.on("error", function (error) {
+                    setStatus("Twilio Device error: " + error.message);
+                    console.error("Twilio Device error:", error);
+                });
+
+                device.on("incoming", function (call) {
+                    activeCall = call;
+                    setStatus("Incoming call detected. Accepting...");
+                    call.accept();
+                });
+
+                device.on("tokenWillExpire", async function () {
+                    try {
+                        const response = await fetch("/token");
+                        const data = await response.json();
+                        if (data.token && device) {
+                            device.updateToken(data.token);
+                            setStatus("Twilio token refreshed.");
+                        }
+                    } catch (err) {
+                        console.error("Token refresh failed:", err);
+                    }
+                });
+
+                await device.register();
+
             } catch (error) {
-                setStatus("Error while fetching token: " + error.message);
+                setStatus("Error while connecting device: " + error.message);
+                console.error(error);
             }
         }
 
-        function makeCall() {
-            if (!twilioToken) {
-                setStatus("No Twilio token yet. Click Connect Device first.");
-                return;
-            }
+        async function makeCall() {
+            try {
+                if (!device) {
+                    setStatus("No Twilio Device yet. Click Connect Device first.");
+                    return;
+                }
 
-            setStatus("Token exists. Next step is Twilio Device registration.");
+                setStatus("Starting browser call...");
+
+                activeCall = await device.connect({
+                    params: {
+                        To: "browser-test"
+                    }
+                });
+
+                activeCall.on("accept", function () {
+                    setStatus("Call connected. Twilio is now executing your /voice webhook.");
+                });
+
+                activeCall.on("disconnect", function () {
+                    setStatus("Call disconnected.");
+                    activeCall = null;
+                });
+
+                activeCall.on("cancel", function () {
+                    setStatus("Call cancelled.");
+                    activeCall = null;
+                });
+
+                activeCall.on("reject", function () {
+                    setStatus("Call rejected.");
+                    activeCall = null;
+                });
+
+                activeCall.on("error", function (error) {
+                    setStatus("Call error: " + error.message);
+                    console.error("Call error:", error);
+                });
+
+            } catch (error) {
+                setStatus("Error while making call: " + error.message);
+                console.error(error);
+            }
         }
 
         function hangUp() {
-            setStatus("Hang Up button clicked.");
+            if (activeCall) {
+                activeCall.disconnect();
+                setStatus("Hanging up active call...");
+            } else if (device) {
+                device.disconnectAll();
+                setStatus("No active call found. Disconnecting all just in case.");
+            } else {
+                setStatus("Nothing to hang up.");
+            }
         }
     </script>
 </body>

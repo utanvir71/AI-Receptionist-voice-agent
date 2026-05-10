@@ -4,6 +4,8 @@ from dotenv import load_dotenv
 from twilio.twiml.voice_response import VoiceResponse, Gather
 from twilio.jwt.access_token import AccessToken
 from twilio.jwt.access_token.grants import VoiceGrant
+from flask import send_from_directory
+
 
 
 load_dotenv()
@@ -120,6 +122,10 @@ def process_speech():
 @app.route("/browser", methods=["GET"])
 def browser():
     return render_template("browser.html")
+
+@app.route("/twilio.min.js")
+def serve_twilio_sdk():
+    return send_from_directory("../templates", "twilio.min.js")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
