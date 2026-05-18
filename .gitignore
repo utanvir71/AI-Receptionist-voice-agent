@@ -3,3 +3,25 @@ __pycache__/
 *.pyc
 .env
 token.pickle
+credentials.json
+```.DS_Store
+.idea/
+.vscode/
+```*.log
+```*.sqlite3
+``` *.db
+```*.bak
+token.json
+```*.pem
+```*.key
+```*.crt
+```*.pfx
+```*.csr
+```*.der
+```*.jks
+```*.keystore
+```*.p12
+```*.p7b
+```*.p7c
+```*.p8
+```*.p10

@@ -6,16 +6,24 @@ from twilio.jwt.access_token import AccessToken
 from twilio.jwt.access_token.grants import VoiceGrant
 from flask import send_from_directory
 from ai import extract_intent_and_entities
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from google_calendar import create_reservation
+
 
 
 
 load_dotenv()
 
-app = Flask(__name__, template_folder="../templates")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
+app = Flask(__name__, template_folder=TEMPLATE_DIR)
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_API_KEY = os.getenv("TWILIO_API_KEY")
 TWILIO_API_SECRET = os.getenv("TWILIO_API_SECRET")
 TWILIO_TWIML_APP_SID = os.getenv("TWILIO_TWIML_APP_SID")
+
+KST = ZoneInfo("Asia/Seoul")
 
 def validate_env():
     missing=[]
@@ -34,7 +42,7 @@ def validate_env():
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
-        "message":"AI Receptionst backend is running!",
+        "message":"AI Receptionist backend is running!",
         "status":"ok"
     }),200
 
@@ -52,7 +60,7 @@ def token():
     if missing:
         return jsonify({
             "ok":False,
-            "error":"Missing environment vairables.",
+            "error":"Missing environment variables.",
             "missing":missing
         }),500
     
@@ -79,7 +87,7 @@ def token():
 @app.route("/voice", methods=["GET","POST"])
 def voice():
     """
-    Twillio call this route when someone calls your Twilio number. We answer the call, greet the caller, and gather speech intput.
+    Twilio calls this route when someone starts a browser or phone call. We answer the call, greet the caller, and gather speech input.
     """
     response = VoiceResponse()
     gather = Gather(input="speech",
@@ -87,8 +95,9 @@ def voice():
                     method="POST",
                     speech_timeout="auto",
                     language="en-US")
-    gather.say("hello, Thank you for calling Nops Seoul Station Branch. How can i help you today?" ,
-        voice = "alice"
+    gather.say(
+        "Hello, thank you for calling NOPS Seoul Station Branch. How can I help you today?",
+        voice="alice"
     )
     response.append(gather)
     response.say(
@@ -96,7 +105,7 @@ def voice():
         voice="alice"
     )
     response.hangup()
-    return str(response), 200, {"content-Type":"text/xml"}
+    return str(response), 200, {"Content-Type": "text/xml"}
 
 @app.route("/process-speech", methods=["GET", "POST"])
 def process_speech():
@@ -117,7 +126,7 @@ def process_speech():
         return str(response), 200, {"Content-Type": "text/xml"}
 
     ai_output = extract_intent_and_entities(speech_result)
-    print("Speach Result:", speech_result)
+    print("Speech Result:", speech_result)
     print("AI output:", ai_output)
     if not ai_output.get("ok"):
         response.say(
@@ -140,28 +149,52 @@ def process_speech():
     time_value = result.get("time")
 
     if intent == "make_reservation":
-        summary_parts = []
-
-        if party_size:
-            summary_parts.append(f"for {party_size} people")
-        if date:
-            summary_parts.append(f"on {date}")
-        if time_value:
-            summary_parts.append(f"at {time_value}")
-        if customer_name:
-            summary_parts.append(f"under the name {customer_name}")
-
-        summary_text = ", ".join(summary_parts) if summary_parts else "but some details are still missing"
-
-        response.say(
-            f"Got it. You want to make a reservation {summary_text}.",
-            voice="alice"
-        )
-        response.say(
-            "This is the AI extraction test. In the next phase, I will save this booking to Google Calendar.",
-            voice="alice"
-        )
-
+        missing_fields = []
+        if not customer_name:
+            missing_fields.append("name")
+        if not party_size:
+            missing_fields.append("party size")
+        if not date:
+            missing_fields.append("date")
+        if not time_value:
+            missing_fields.append("time")
+        if missing_fields:
+            response.say(
+                f"I can help with that. I still need your {', '.join(missing_fields)} to complete the reservation.",
+                voice="alice"
+            )
+            response.hangup()
+            return str(response), 200, {"Content-Type": "text/xml"}
+        try:
+            # TEMPORARY: for now, Grok must return date like 2026-05-18 and time like 19:00
+            start_time = datetime.strptime(
+                f"{date} {time_value}",
+                "%Y-%m-%d %H:%M"
+            ).replace(tzinfo=KST)
+            booking_result = create_reservation(
+                customer_name=customer_name,
+                party_size=int(party_size),
+                start_time=start_time,
+                phone=None,
+                notes="Created from AI receptionist voice call"
+            )
+            if booking_result.get("ok"):
+                response.say(
+                    f"Your reservation is confirmed for {party_size} people on {date} at {time_value}, under the name {customer_name}.",
+                    voice="alice"
+                )
+            else:
+                response.say(
+                    "Sorry, that time slot is not available. Please choose another time.",
+                    voice="alice"
+                )
+        except Exception as exc:
+            print("Booking error:", exc)
+            response.say(
+                "I understood your reservation request, but I had trouble creating the booking in the calendar.",
+                voice="alice"
+            )
+        
     elif intent == "ask_hours":
         response.say(
             "You are asking about business hours. I will support exact hour answers in the next step.",
@@ -205,7 +238,7 @@ def browser():
 
 @app.route("/twilio.min.js")
 def serve_twilio_sdk():
-    return send_from_directory("../templates", "twilio.min.js")
+    return send_from_directory(TEMPLATE_DIR, "twilio.min.js")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
