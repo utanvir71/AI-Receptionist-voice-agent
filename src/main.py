@@ -31,6 +31,8 @@ TWILIO_API_SECRET = os.getenv("TWILIO_API_SECRET")
 TWILIO_TWIML_APP_SID = os.getenv("TWILIO_TWIML_APP_SID")
 
 KST = ZoneInfo("Asia/Seoul")
+TTS_VOICE = os.getenv("TTS_VOICE", "Polly.Joanna-Neural")
+SPEECH_TIMEOUT = os.getenv("SPEECH_TIMEOUT", "1")
 RESERVATION_FIELDS = ("customer_name", "party_size", "date", "time")
 CANCEL_FIELDS = ("customer_name", "date", "time")
 MODIFY_FIELDS = ("customer_name", "date", "time", "new_date", "new_time")
@@ -150,12 +152,26 @@ def _gather_follow_up(response, question, state):
         input="speech",
         action=f"{request.url_root}process-speech?state={state_token}",
         method="POST",
-        speech_timeout="auto",
+        speech_timeout=SPEECH_TIMEOUT,
         language="en-US",
     )
-    gather.say(question, voice="alice")
+    gather.say(question, voice=TTS_VOICE)
     response.append(gather)
-    response.say("Sorry, I did not hear anything. Please call again.", voice="alice")
+    response.say("Sorry, I did not hear anything. Please call again.", voice=TTS_VOICE)
+    response.hangup()
+
+
+def _gather_anything_else(response):
+    gather = Gather(
+        input="speech",
+        action=f"{request.url_root}process-speech",
+        method="POST",
+        speech_timeout=SPEECH_TIMEOUT,
+        language="en-US",
+    )
+    gather.say("Is there anything else you would like to know?", voice=TTS_VOICE)
+    response.append(gather)
+    response.say("Thank you for calling NOPS Seoul Station Branch. Goodbye.", voice=TTS_VOICE)
     response.hangup()
 
 
@@ -169,6 +185,22 @@ def _is_no(text):
     normalized = text.lower().strip()
     no_words = ("no", "nope", "cancel", "not correct", "wrong", "stop")
     return any(word in normalized for word in no_words)
+
+
+def _is_done(text):
+    normalized = text.lower().strip().strip(".!")
+    done_phrases = {
+        "no",
+        "no thanks",
+        "no thank you",
+        "nothing",
+        "nothing else",
+        "that's all",
+        "that is all",
+        "i'm done",
+        "im done",
+    }
+    return normalized in done_phrases
 
 
 def _parse_start_time(date_value, time_value):
@@ -232,11 +264,11 @@ def _execute_confirmed_action(response, state):
         start_time = _parse_start_time(state.get("date"), state.get("time"))
         result = cancel_reservation_by_details(state.get("customer_name"), start_time)
         if result.get("ok"):
-            response.say("Your reservation has been cancelled.", voice="alice")
+            response.say("Your reservation has been cancelled.", voice=TTS_VOICE)
         else:
             response.say(
                 "Sorry, I could not find a matching reservation to cancel.",
-                voice="alice"
+                voice=TTS_VOICE
             )
         return
 
@@ -245,7 +277,7 @@ def _execute_confirmed_action(response, state):
         new_start_time = _parse_start_time(state.get("new_date"), state.get("new_time"))
         is_valid, reason = _is_valid_reservation_time(new_start_time)
         if not is_valid:
-            response.say(reason, voice="alice")
+            response.say(reason, voice=TTS_VOICE)
             return
 
         result = modify_reservation_by_details(
@@ -256,19 +288,19 @@ def _execute_confirmed_action(response, state):
         if result.get("ok"):
             response.say(
                 f"Your reservation has been updated to {state.get('new_date')} at {state.get('new_time')}.",
-                voice="alice"
+                voice=TTS_VOICE
             )
         else:
             response.say(
                 "Sorry, I could not modify that reservation. The original reservation was not found, or the new time is unavailable.",
-                voice="alice"
+                voice=TTS_VOICE
             )
         return
 
     start_time = _parse_start_time(state.get("date"), state.get("time"))
     is_valid, reason = _is_valid_reservation_time(start_time)
     if not is_valid:
-        response.say(reason, voice="alice")
+        response.say(reason, voice=TTS_VOICE)
         return
 
     notes = state.get("notes")
@@ -287,12 +319,12 @@ def _execute_confirmed_action(response, state):
         response.say(
             f"Your reservation is confirmed for {state.get('party_size')} people on {state.get('date')} "
             f"at {state.get('time')}, under the name {state.get('customer_name')}.{note_text}",
-            voice="alice"
+            voice=TTS_VOICE
         )
     else:
         response.say(
             "Sorry, that time slot is not available. Please choose another time.",
-            voice="alice"
+            voice=TTS_VOICE
         )
 
 def validate_env():
@@ -363,16 +395,16 @@ def voice():
     gather = Gather(input="speech",
                     action=f"{request.url_root}process-speech",
                     method="POST",
-                    speech_timeout="auto",
+                    speech_timeout=SPEECH_TIMEOUT,
                     language="en-US")
     gather.say(
         "Hello, thank you for calling NOPS Seoul Station Branch. How can I help you today?",
-        voice="alice"
+        voice=TTS_VOICE
     )
     response.append(gather)
     response.say(
         "I didn't catch that. Please call again. Thank you.",
-        voice="alice"
+        voice=TTS_VOICE
     )
     response.hangup()
     return str(response), 200, {"Content-Type": "text/xml"}
@@ -390,7 +422,7 @@ def process_speech():
     if not speech_result:
         response.say(
             "Sorry, I did not hear anything. Please call again.",
-            voice="alice"
+            voice=TTS_VOICE
         )
         response.hangup()
         return str(response), 200, {"Content-Type": "text/xml"}
@@ -404,13 +436,16 @@ def process_speech():
                 print("Confirmed action error:", exc)
                 response.say(
                     "Sorry, I had trouble completing that action in the calendar.",
-                    voice="alice"
+                    voice=TTS_VOICE
                 )
-            response.hangup()
+                response.hangup()
+                return str(response), 200, {"Content-Type": "text/xml"}
+
+            _gather_anything_else(response)
             return str(response), 200, {"Content-Type": "text/xml"}
 
         if _is_no(speech_result):
-            response.say("No problem. I have not made any calendar changes.", voice="alice")
+            response.say("No problem. I have not made any calendar changes.", voice=TTS_VOICE)
             response.hangup()
             return str(response), 200, {"Content-Type": "text/xml"}
 
@@ -421,17 +456,22 @@ def process_speech():
         )
         return str(response), 200, {"Content-Type": "text/xml"}
 
+    if not previous_state and _is_done(speech_result):
+        response.say("Thank you for calling NOPS Seoul Station Branch. Goodbye.", voice=TTS_VOICE)
+        response.hangup()
+        return str(response), 200, {"Content-Type": "text/xml"}
+
     ai_output = extract_intent_and_entities(speech_result, previous_state)
     print("Speech Result:", speech_result)
     print("AI output:", ai_output)
     if not ai_output.get("ok"):
         response.say(
             "I heard you, but I had trouble understanding your request in the AI system.",
-            voice="alice"
+            voice=TTS_VOICE
         )
         response.say(
             "Please try again later.",
-            voice="alice"
+            voice=TTS_VOICE
         )
         response.hangup()
         return str(response), 200, {"Content-Type": "text/xml"}
@@ -490,7 +530,7 @@ def process_speech():
             print("Time validation error:", exc)
             response.say(
                 "I understood the details, but the date or time format was not clear. Please try again.",
-                voice="alice"
+                voice=TTS_VOICE
             )
             response.hangup()
             return str(response), 200, {"Content-Type": "text/xml"}
@@ -499,24 +539,34 @@ def process_speech():
         return str(response), 200, {"Content-Type": "text/xml"}
         
     elif intent == "ask_hours":
-        response.say(answer_from_kb(intent), voice="alice")
+        response.say(answer_from_kb(intent), voice=TTS_VOICE)
+        _gather_anything_else(response)
+        return str(response), 200, {"Content-Type": "text/xml"}
 
     elif intent == "ask_menu":
-        response.say(answer_from_kb(intent), voice="alice")
+        response.say(answer_from_kb(intent), voice=TTS_VOICE)
+        _gather_anything_else(response)
+        return str(response), 200, {"Content-Type": "text/xml"}
 
     elif intent == "ask_parking":
-        response.say(answer_from_kb(intent), voice="alice")
+        response.say(answer_from_kb(intent), voice=TTS_VOICE)
+        _gather_anything_else(response)
+        return str(response), 200, {"Content-Type": "text/xml"}
 
     elif intent == "ask_location":
-        response.say(answer_from_kb(intent), voice="alice")
+        response.say(answer_from_kb(intent), voice=TTS_VOICE)
+        _gather_anything_else(response)
+        return str(response), 200, {"Content-Type": "text/xml"}
 
     elif intent in ("ask_event", "ask_seating", "ask_private_room"):
-        response.say(answer_from_kb(intent), voice="alice")
+        response.say(answer_from_kb(intent), voice=TTS_VOICE)
+        _gather_anything_else(response)
+        return str(response), 200, {"Content-Type": "text/xml"}
 
     else:
         response.say(
             "I can help with reservations, business hours, location, parking, menu, events, and seating information.",
-            voice="alice"
+            voice=TTS_VOICE
         )
 
     response.hangup()
