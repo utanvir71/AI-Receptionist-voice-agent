@@ -4,6 +4,7 @@ import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
+from restaurant import get_kb_context
 
 load_dotenv()
 
@@ -32,7 +33,7 @@ def _extract_json(content: str) -> dict:
     return json.loads(content[start:end + 1])
 
 
-def extract_intent_and_entities(user_text: str) -> dict:
+def extract_intent_and_entities(user_text: str, reservation_state=None) -> dict:
     """
     Send caller transcript to Grok and return structured reservation-related info.
 
@@ -44,7 +45,7 @@ def extract_intent_and_entities(user_text: str) -> dict:
         "date": "2026-05-18",
         "time": "19:00",
         "confidence": "high",
-        "notes": "short note"
+        "notes": "short note or null"
     }
     """
 
@@ -55,12 +56,26 @@ def extract_intent_and_entities(user_text: str) -> dict:
         }
 
     today = datetime.now(KST).strftime("%Y-%m-%d")
+    state_context = ""
+    if reservation_state:
+        state_context = f"""
+Current partial reservation details:
+{json.dumps(reservation_state, ensure_ascii=False)}
+
+The caller may be answering a follow-up question with only one missing detail.
+Keep the existing details and extract any new detail from the latest caller speech.
+""".strip()
 
     system_prompt = f"""
 You are an AI receptionist for NOPS Seoul Station Branch, a restaurant.
 Your job is to extract the caller's intent and reservation entities from their speech.
 
 Today's date in Seoul is {today}.
+
+{state_context}
+
+Use this restaurant knowledge base only to classify restaurant questions:
+{get_kb_context()}
 
 Return ONLY valid JSON.
 Do not add markdown.
@@ -72,17 +87,26 @@ Allowed intents:
 - ask_menu
 - ask_parking
 - ask_location
+- ask_event
+- ask_seating
+- ask_private_room
 - cancel_reservation
 - modify_reservation
 - unknown
 
 Rules:
 - If the caller wants to book, reserve, make a reservation, get a table, or asks for a table, use intent "make_reservation".
+- If the caller wants to cancel a reservation, use intent "cancel_reservation".
+- If the caller wants to change, move, update, or modify a reservation, use intent "modify_reservation".
+- If the caller gives missing reservation details after being asked a follow-up question, still use intent "make_reservation".
+- If the current partial reservation flow is cancel_reservation or modify_reservation, keep that intent.
 - Convert relative dates like "today", "tomorrow", and "next Friday" into YYYY-MM-DD using today's Seoul date.
 - Return time in 24-hour HH:MM format.
 - If date or time is missing, return null for that field.
 - If party size is missing, return null.
 - If customer name is missing, return null.
+- Put seating requests, private room requests, birthday notes, late arrival notes, and other reservation preferences in notes.
+- If there are no notes, return null for notes.
 - Do not guess missing details.
 - For casual non-restaurant questions, use intent "unknown".
 
@@ -94,7 +118,7 @@ JSON schema:
     "date": "YYYY-MM-DD string or null",
     "time": "HH:MM string or null",
     "confidence": "low or medium or high",
-    "notes": "short string"
+    "notes": "short string or null"
 }}
 """.strip()
 

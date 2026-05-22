@@ -155,6 +155,85 @@ def cancel_reservation(event_id):
     }
 
 
+def find_reservation(customer_name, start_time, search_window_minutes=15):
+    service = get_calendar_service()
+    time_min = start_time - timedelta(minutes=search_window_minutes)
+    time_max = start_time + timedelta(minutes=search_window_minutes)
+    events_result = service.events().list(
+        calendarId=CALENDAR_ID,
+        timeMin=time_min.isoformat(),
+        timeMax=time_max.isoformat(),
+        singleEvents=True,
+        orderBy="startTime"
+    ).execute()
+
+    customer_name = customer_name.lower().strip()
+    for event in events_result.get("items", []):
+        summary = event.get("summary", "").lower()
+        description = event.get("description", "").lower()
+        if customer_name in summary or customer_name in description:
+            return event
+
+    return None
+
+
+def cancel_reservation_by_details(customer_name, start_time):
+    event = find_reservation(customer_name, start_time)
+    if not event:
+        return {
+            "ok": False,
+            "message": "No matching reservation was found.",
+        }
+
+    return cancel_reservation(event["id"])
+
+
+def modify_reservation_by_details(customer_name, old_start_time, new_start_time, duration_minutes=90):
+    service = get_calendar_service()
+    event = find_reservation(customer_name, old_start_time)
+    if not event:
+        return {
+            "ok": False,
+            "message": "No matching reservation was found.",
+        }
+
+    new_end_time = new_start_time + timedelta(minutes=duration_minutes)
+    availability = check_availability(new_start_time, new_end_time)
+    conflicts = [
+        conflict for conflict in availability["conflicts"]
+        if conflict.get("id") != event.get("id")
+    ]
+    if conflicts:
+        return {
+            "ok": False,
+            "message": "The new time slot is not available.",
+            "conflicts": conflicts,
+        }
+
+    event["start"] = {
+        "dateTime": new_start_time.isoformat(),
+        "timeZone": "Asia/Seoul"
+    }
+    event["end"] = {
+        "dateTime": new_end_time.isoformat(),
+        "timeZone": "Asia/Seoul"
+    }
+
+    updated_event = service.events().update(
+        calendarId=CALENDAR_ID,
+        eventId=event["id"],
+        body=event,
+    ).execute()
+
+    return {
+        "ok": True,
+        "event_id": updated_event.get("id"),
+        "event_link": updated_event.get("htmlLink"),
+        "start_time": new_start_time.isoformat(),
+        "end_time": new_end_time.isoformat(),
+    }
+
+
 
 if __name__ == "__main__":
     test_start = datetime(2026, 5, 18, 19, 0, tzinfo=KST)
