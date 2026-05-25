@@ -14,6 +14,7 @@ from google_calendar import (
     cancel_reservation_by_details,
     create_reservation,
     modify_reservation_by_details,
+    test_calendar_connection,
 )
 from restaurant import answer_from_kb
 
@@ -355,6 +356,18 @@ def health():
         "service":"ai-receptionist",
         "method":request.method
     }),200
+
+@app.route("/calendar/auth", methods=["GET"])
+def calendar_auth():
+    try:
+        result = test_calendar_connection()
+        return jsonify(result), 200
+    except Exception as exc:
+        return jsonify({
+            "ok": False,
+            "error": "Google Calendar authorization failed.",
+            "details": str(exc),
+        }), 500
 
 @app.route("/token", methods=["GET"])
 def token():

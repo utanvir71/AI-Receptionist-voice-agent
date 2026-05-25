@@ -1,4 +1,5 @@
 import os
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -17,21 +18,45 @@ KST = ZoneInfo("Asia/Seoul")
 CALENDAR_ID = "primary"
 
 
+class CalendarAuthError(Exception):
+    pass
+
+
+def _clear_saved_token():
+    if os.path.exists(TOKEN_PATH):
+        os.remove(TOKEN_PATH)
+
+
 def get_calendar_service():
     creds = None
 
     if os.path.exists(TOKEN_PATH):
-        creds = Credentials.from_authorized_user_file(
-            TOKEN_PATH,
-            SCOPES
-        )
+        try:
+            creds = Credentials.from_authorized_user_file(
+                TOKEN_PATH,
+                SCOPES
+            )
+        except ValueError as exc:
+            _clear_saved_token()
+            raise CalendarAuthError(
+                "Saved Google Calendar token is invalid. Please authorize again."
+            ) from exc
 
     if not creds or not creds.valid:
 
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+            except RefreshError:
+                _clear_saved_token()
+                creds = None
 
-        else:
+        if not creds or not creds.valid:
+            if not os.path.exists(CREDENTIALS_PATH):
+                raise CalendarAuthError(
+                    "Missing credentials.json. Add Google OAuth credentials first."
+                )
+
             flow = InstalledAppFlow.from_client_secrets_file(
                 CREDENTIALS_PATH,
                 SCOPES
