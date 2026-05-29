@@ -25,3 +25,5 @@ token.json
 ```*.p7c
 ```*.p8
 ```*.p10
+._*
+.DS_Stores

@@ -189,7 +189,10 @@ def _is_no(text):
 
 
 def _is_done(text):
-    normalized = text.lower().strip().strip(".!")
+    normalized = text.lower().strip().strip(".!?")
+    hangup_phrases = ("hang up", "hangup", "end the call", "end call", "goodbye", "bye")
+    if any(phrase in normalized for phrase in hangup_phrases):
+        return True
     done_phrases = {
         "no",
         "no thanks",
@@ -578,7 +581,7 @@ def process_speech():
 
     else:
         response.say(
-            "I can help with reservations, business hours, location, parking, menu, events, and seating information.",
+            "Sorry, I could not understand that clearly. Thank you for calling NOPS Seoul Station Branch. Goodbye.",
             voice=TTS_VOICE
         )
 
