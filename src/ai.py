@@ -45,7 +45,9 @@ def extract_intent_and_entities(user_text: str, reservation_state=None) -> dict:
         "date": "2026-05-18",
         "time": "19:00",
         "confidence": "high",
-        "notes": "short note or null"
+        "notes": "short note or null",
+        "receptionist_reply": "short spoken answer or null",
+        "needs_clarification": false
     }
     """
 
@@ -69,12 +71,13 @@ Keep the existing details and extract any new detail from the latest caller spee
     system_prompt = f"""
 You are an AI receptionist for NOPS Seoul Station Branch, a restaurant.
 Your job is to extract the caller's intent and reservation entities from their speech.
+You also write a short, natural spoken reply for restaurant questions that do not require a Flask action.
 
 Today's date in Seoul is {today}.
 
 {state_context}
 
-Use this restaurant knowledge base only to classify restaurant questions:
+Use this restaurant knowledge base to classify and answer restaurant questions:
 {get_kb_context()}
 
 Return ONLY valid JSON.
@@ -108,7 +111,14 @@ Rules:
 - Put seating requests, private room requests, birthday notes, late arrival notes, and other reservation preferences in notes.
 - If there are no notes, return null for notes.
 - Do not guess missing details.
-- For casual non-restaurant questions, use intent "unknown".
+- For restaurant questions that do not match a specific intent, use intent "unknown" and answer naturally from the knowledge base.
+- If the caller only says they want to ask a question, use intent "unknown" and ask what they would like to know.
+- If the caller's meaning is unclear, use intent "unknown" and politely ask them to repeat or clarify.
+- For casual non-restaurant questions, use intent "unknown" and politely explain that you can help with restaurant-related questions.
+- Set receptionist_reply to null for reservation, cancellation, and modification flows because Flask handles those replies.
+- For information questions and unknown intent, write a concise receptionist_reply suitable for text-to-speech.
+- Set needs_clarification to true only when the caller needs to repeat, clarify, or finish asking their question. Otherwise set it to false.
+- Never invent information that is not in the knowledge base.
 
 JSON schema:
 {{
@@ -118,7 +128,9 @@ JSON schema:
     "date": "YYYY-MM-DD string or null",
     "time": "HH:MM string or null",
     "confidence": "low or medium or high",
-    "notes": "short string or null"
+    "notes": "short string or null",
+    "receptionist_reply": "short spoken answer or null",
+    "needs_clarification": "boolean"
 }}
 """.strip()
 

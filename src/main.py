@@ -1,6 +1,7 @@
 import os
 import json
 import base64
+import re
 from flask import Flask, jsonify, render_template, request
 from dotenv import load_dotenv
 from twilio.twiml.voice_response import VoiceResponse, Gather
@@ -37,6 +38,7 @@ SPEECH_TIMEOUT = os.getenv("SPEECH_TIMEOUT", "1")
 RESERVATION_FIELDS = ("customer_name", "party_size", "date", "time")
 CANCEL_FIELDS = ("customer_name", "date", "time")
 MODIFY_FIELDS = ("customer_name", "date", "time", "new_date", "new_time")
+MAX_PARTY_SIZE = 12
 
 
 def _load_state():
@@ -189,7 +191,8 @@ def _is_no(text):
 
 
 def _is_done(text):
-    normalized = text.lower().strip().strip(".!?")
+    normalized = re.sub(r"[^a-z0-9'\s]", " ", text.lower())
+    normalized = " ".join(normalized.split())
     hangup_phrases = ("hang up", "hangup", "end the call", "end call", "goodbye", "bye")
     if any(phrase in normalized for phrase in hangup_phrases):
         return True
@@ -305,6 +308,12 @@ def _execute_confirmed_action(response, state):
     is_valid, reason = _is_valid_reservation_time(start_time)
     if not is_valid:
         response.say(reason, voice=TTS_VOICE)
+        return
+    if int(state.get("party_size")) > MAX_PARTY_SIZE:
+        response.say(
+            "Sorry, reservations are limited to a maximum of 12 guests.",
+            voice=TTS_VOICE
+        )
         return
 
     notes = state.get("notes")
@@ -436,11 +445,11 @@ def process_speech():
     response = VoiceResponse()
 
     if not speech_result:
-        response.say(
-            "Sorry, I did not hear anything. Please call again.",
-            voice=TTS_VOICE
+        _gather_follow_up(
+            response,
+            "Sorry, I did not hear anything. Could you please repeat that?",
+            {},
         )
-        response.hangup()
         return str(response), 200, {"Content-Type": "text/xml"}
 
     previous_state = _load_state()
@@ -481,15 +490,11 @@ def process_speech():
     print("Speech Result:", speech_result)
     print("AI output:", ai_output)
     if not ai_output.get("ok"):
-        response.say(
-            "I heard you, but I had trouble understanding your request in the AI system.",
-            voice=TTS_VOICE
+        _gather_follow_up(
+            response,
+            "Sorry, I had trouble processing that. Could you please say it again?",
+            previous_state,
         )
-        response.say(
-            "Please try again later.",
-            voice=TTS_VOICE
-        )
-        response.hangup()
         return str(response), 200, {"Content-Type": "text/xml"}
 
     result = ai_output["result"]
@@ -514,6 +519,15 @@ def process_speech():
             _gather_follow_up(
                 response,
                 _question_for_field(missing_field, reservation_state),
+                reservation_state,
+            )
+            return str(response), 200, {"Content-Type": "text/xml"}
+
+        if intent == "make_reservation" and int(party_size) > MAX_PARTY_SIZE:
+            reservation_state.pop("party_size", None)
+            _gather_follow_up(
+                response,
+                "Sorry, reservations are limited to a maximum of 12 guests. How many people will be coming?",
                 reservation_state,
             )
             return str(response), 200, {"Content-Type": "text/xml"}
@@ -580,10 +594,16 @@ def process_speech():
         return str(response), 200, {"Content-Type": "text/xml"}
 
     else:
-        response.say(
-            "Sorry, I could not understand that clearly. Thank you for calling NOPS Seoul Station Branch. Goodbye.",
-            voice=TTS_VOICE
+        receptionist_reply = (
+            result.get("receptionist_reply")
+            or "I would be happy to help. Could you please tell me what you would like to know?"
         )
+        if result.get("needs_clarification"):
+            _gather_follow_up(response, receptionist_reply, {})
+        else:
+            response.say(receptionist_reply, voice=TTS_VOICE)
+            _gather_anything_else(response)
+        return str(response), 200, {"Content-Type": "text/xml"}
 
     response.hangup()
     return str(response), 200, {"Content-Type": "text/xml"}
